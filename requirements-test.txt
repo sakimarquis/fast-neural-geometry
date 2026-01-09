@@ -1,0 +1,6 @@
+-r requirements.txt
+autograd
+cvxopt
+pymanopt>=2.0
+pytest
+scipy
