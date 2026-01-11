@@ -26,8 +26,7 @@ implementation used to validate the optimized code. The original implementation 
 
 ## Quick start
 
-Each manifold is a 2D array with shape `(d, n)` where `d` is the ambient dimension and `n` is the
-number of sampled points. Pass a list of manifolds into the analysis functions.
+Each manifold is a 2D array with shape `(d, n)` where `d` is the ambient dimension and `n` is the number of sampled points. Pass a list of manifolds into the analysis functions.
 
 ### Manifold analysis (fast)
 ```python
@@ -71,6 +70,28 @@ a_Mfull, R_M, D_M, res_coeff0, KK = manifold_analysis_corr_fast(
     device="cuda",
 )
 ```
+
+### Manifold SNR (pairwise)
+`manifold_snr.py` implements the Sorscher et al. (2022) geometry-based SNR for binary classification. The code is from https://github.com/bsorsch/geometry-fewshot-learning/.
+It extracts per-class manifold geometry via SVD and combines distance and overlap terms into an
+SNR estimate.
+
+```python
+import numpy as np
+from manifold_snr import pairwise_manifold_snr
+
+n_samples = 200
+n_features = 64
+
+class_0 = np.random.randn(n_samples, n_features)
+class_1 = np.random.randn(n_samples, n_features)
+
+stats = pairwise_manifold_snr(class_0, class_1, m=1)
+print(stats["snr"])
+```
+
+Returns a dict with `participation_ratio`, `dist_norm`, `signal_noise_overlap`, `signal`, `bias`,
+`noise`, and `snr`. Inputs are `(n_samples, n_features)` arrays (one per class).
 
 ### Shape notes for `t_vecs`
 

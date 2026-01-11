@@ -1,23 +1,13 @@
-"""This module implements geometric analysis methods from: Sorscher et al. (2022)
+"""Geometric analysis methods from Sorscher et al. (2022).
 
 Key geometric properties computed:
-- Center: manifold centroid
-- Radius spectrum (R): SVD singular values capturing manifold spread
-- Dimensionality (D): participation ratio = (ΣR²)² / ΣR⁴
+- Participation ratio (D): effective dimensionality = (ΣR²)² / ΣR⁴
 - Normalized distance (dist_norm): inter-class distance scaled by radius
-- Center-subspace overlap (csa): alignment of manifold subspace with inter-center direction
-- Subspace-subspace overlap (ss): overlap between class subspaces
-- Bias: asymmetry between manifold radii
-- Signal-to-Noise Ratio (SNR): predicts classification separability
+- Signal-noise overlap: center-subspace alignment scaled by distance
+- Signal, Noise, SNR: classification separability metrics
 """
 
 import numpy as np
-from scipy.special import erfc
-
-
-def snr_to_error(snr: np.ndarray) -> np.ndarray:
-    """Convert SNR to expected error rate [0, 0.5] (0.5 = chance level) via Gaussian CDF."""
-    return 0.5 * erfc(snr / np.sqrt(2))
 
 
 def extract_manifold_geometry(manifold: np.ndarray) -> dict:
@@ -96,16 +86,15 @@ def pairwise_manifold_snr(manifold_0: np.ndarray, manifold_1: np.ndarray, m: int
 
     The SNR is derived from the balance of class separation (signal) and manifold overlap (noise):
         signal = dist_norm² + bias/m
-        noise² = 1/(D·m) + css + ss/m
+        noise² = 1/(D·m) + signal_noise_overlap + ss/m
         SNR    = 0.5 * signal / noise
 
     Terms:
-        - dist_norm : Normalized inter-class distance (primary signal strength).
-        - bias      : Asymmetry in class variances; scales with 1/m.
-        - D         : Effective dimensionality (noise reduction via averaging).
-        - css       : Center-subspace overlap (manifold spread along the decision axis).
-        - ss        : Subspace-subspace overlap (shared noise structure).
-        - m         : Training examples per class (m=1 indicates one-shot learning).
+        - dist_norm           : Normalized inter-class distance (primary signal strength).
+        - bias                : Asymmetry in class variances; scales with 1/m.
+        - participation_ratio : Effective dimensionality D = (ΣR²)² / ΣR⁴ (noise reduction via averaging).
+        - signal_noise_overlap: Center-subspace overlap scaled by distance (manifold spread along decision axis).
+        - m                   : Training examples per class (m=1 indicates one-shot learning).
     """
     geom_0 = extract_manifold_geometry(manifold_0)
     geom_1 = extract_manifold_geometry(manifold_1)
@@ -114,26 +103,24 @@ def pairwise_manifold_snr(manifold_0: np.ndarray, manifold_1: np.ndarray, m: int
     raw_distance = np.linalg.norm(center_diff)
     inter_class_direction = center_diff / raw_distance if raw_distance > 0 else center_diff
 
-    # 1. Center-subspace overlap: how much does each manifold extend along decision axis?
-    csa_0 = compute_center_subspace_overlap(geom_0['radii'], geom_0['subspace'], inter_class_direction)
-    csa_1 = compute_center_subspace_overlap(geom_1['radii'], geom_1['subspace'], inter_class_direction)
-    # 2. Subspace-subspace overlap: do classes share the same noise directions?
+    # Center-subspace overlap: how much does each manifold extend along decision axis?
+    cs_overlap_0 = compute_center_subspace_overlap(geom_0['radii'], geom_0['subspace'], inter_class_direction)
+    cs_overlap_1 = compute_center_subspace_overlap(geom_1['radii'], geom_1['subspace'], inter_class_direction)
+    # Subspace-subspace overlap: do classes share the same noise directions?
     ss_overlap = compute_subspace_overlap(geom_0['radii'], geom_0['subspace'], geom_1['radii'], geom_1['subspace'])
-    # 3. Bias: asymmetry in manifold sizes (larger class dominates prototype)
+    # Bias: asymmetry in manifold sizes
     variance_ratio = geom_0['total_variance'] / geom_1['total_variance'] if geom_1['total_variance'] > 0 else 0.0
     bias = variance_ratio - 1
-    # 4. Dimensionality: higher D = more directions to average over = less noise
-    mean_dimensionality = (geom_0['dimensionality'] + geom_1['dimensionality']) / 2
+    # Participation ratio: higher = more directions to average over = less noise
+    participation_ratio = (geom_0['dimensionality'] + geom_1['dimensionality']) / 2
     avg_variance_0 = geom_0['total_variance'] / manifold_0.shape[0]
     normalized_distance = raw_distance / np.sqrt(avg_variance_0) if avg_variance_0 > 0 else 0.0
-    css_term = (csa_0 + csa_1 / m) * normalized_distance ** 2
+    signal_noise_overlap = (cs_overlap_0 + cs_overlap_1 / m) * normalized_distance ** 2
     signal = normalized_distance ** 2 + bias / m
-    noise_variance = 1 / (mean_dimensionality * m) + css_term + ss_overlap / m
+    noise_variance = 1 / (participation_ratio * m) + signal_noise_overlap + ss_overlap / m
     noise = np.sqrt(noise_variance) if noise_variance > 0 else 1e-10
     snr = 0.5 * signal / noise
-    predicted_error = snr_to_error(snr)
 
-    return {'dimensionality_0': geom_0['dimensionality'], 'dimensionality_1': geom_1['dimensionality'],
-            'dimensionality_mean': mean_dimensionality, 'dist_norm': normalized_distance,
-            'center_subspace_overlap_0': csa_0, 'center_subspace_overlap_1': csa_1, 'subspace_overlap': ss_overlap,
-            'bias': bias, 'signal': signal, 'noise': noise, 'snr': snr, 'predicted_error': predicted_error}
+    return {'participation_ratio': participation_ratio, 'dist_norm': normalized_distance,
+            'signal_noise_overlap': signal_noise_overlap, 'signal': signal, 'bias': bias,
+            'noise': noise, 'snr': snr}
